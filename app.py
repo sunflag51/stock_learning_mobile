@@ -1,9 +1,13 @@
-from data.watchlist_loader import (
-    get_enabled_watchlist,
-    load_watchlist_from_repository,
+from data.market_provider import (
+    fetch_price_data,
+    get_price_data_summary,
 )
 
-watchlist = load_watchlist_from_repository()
-enabled_watchlist = get_enabled_watchlist(watchlist)
+price_data = fetch_price_data(
+    provider_symbol="AAPL",
+    period="2y",
+    interval="1d",
+)
 
-print(enabled_watchlist)
+print(price_data.tail())
+print(get_price_data_summary(price_data))
