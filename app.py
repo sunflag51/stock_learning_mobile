@@ -10,3 +10,7 @@ st.write([p.name for p in app_dir.iterdir()])
 csv_files = list(app_dir.glob("*.csv"))
 st.write("見つかったCSVファイル:")
 st.write([p.name for p in csv_files])
+csv_files = list(app_dir.rglob("*.csv"))
+
+st.write("サブフォルダを含むCSVファイル:")
+st.write([str(p.relative_to(app_dir)) for p in csv_files])
