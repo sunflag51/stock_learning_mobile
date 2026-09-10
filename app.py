@@ -1,13 +1,13 @@
-from data.market_provider import (
-    fetch_price_data,
-    get_price_data_summary,
+import streamlit as st
+
+st.set_page_config(
+    page_title="動作確認",
+    page_icon="✅",
+    layout="centered",
 )
 
-price_data = fetch_price_data(
-    provider_symbol="AAPL",
-    period="2y",
-    interval="1d",
-)
+st.title("第2回 動作確認")
 
-print(price_data.tail())
-print(get_price_data_summary(price_data))
+st.success("Streamlitの画面表示に成功しました。")
+
+st.write("この文字が表示されれば、第1段階は正常です。")
