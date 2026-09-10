@@ -1,15 +1,12 @@
-target_master = master_df.loc[
-    master_df["enabled"].astype(str).str.lower().eq("true")
-].copy()
+from pathlib import Path
+import streamlit as st
 
-expected = set(target_master["provider_symbol"])
-actual = set(fetched_df["provider_symbol"])
+app_dir = Path(__file__).resolve().parent
 
-missing = expected - actual
-unexpected = actual - expected
+st.write("app.pyの場所:", str(app_dir))
+st.write("同じフォルダ内のファイル:")
+st.write([p.name for p in app_dir.iterdir()])
 
-if missing:
-    raise ValueError(f"取得できなかった銘柄: {sorted(missing)}")
-
-if unexpected:
-    raise ValueError(f"処理対象外のデータが含まれています: {sorted(unexpected)}")
+csv_files = list(app_dir.glob("*.csv"))
+st.write("見つかったCSVファイル:")
+st.write([p.name for p in csv_files])
