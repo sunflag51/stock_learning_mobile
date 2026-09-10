@@ -1,15 +1,17 @@
 from pathlib import Path
+import re
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 from plotly.subplots import make_subplots
 
 
 # =========================================================
-# Streamlit 基本設定
+# Streamlit基本設定
 # =========================================================
 st.set_page_config(
     page_title="株式学習チャート",
@@ -20,12 +22,13 @@ st.set_page_config(
 
 st.title("📈 株式学習チャート")
 st.caption(
-    "第11段階：処理対象銘柄の比較サマリー、指標確認、個別チャート表示"
+    "第11段階：4銘柄の比較サマリーと、"
+    "スマートフォン向けピンチ操作対応チャート"
 )
 
 
 # =========================================================
-# iPhone・スマートフォン向け表示調整
+# スマートフォン向け画面調整
 # =========================================================
 st.markdown(
     """
@@ -86,7 +89,7 @@ REQUIRED_COLUMNS = [
 
 
 # =========================================================
-# CSVマスター読み込み
+# 銘柄マスターCSV読み込み
 # =========================================================
 @st.cache_data
 def load_watchlist(csv_path: str) -> pd.DataFrame:
@@ -106,6 +109,7 @@ def load_watchlist(csv_path: str) -> pd.DataFrame:
     master_df.columns = (
         master_df.columns
         .astype(str)
+        .str.replace("\u3000", " ", regex=False)
         .str.strip()
     )
 
@@ -121,16 +125,15 @@ def load_watchlist(csv_path: str) -> pd.DataFrame:
             + ", ".join(missing_columns)
         )
 
-    # 文字列の前後にある半角・全角空白を除去
+    # 半角・全角空白を除去
     for column in master_df.columns:
-        if master_df[column].dtype == "object":
-            master_df[column] = (
-                master_df[column]
-                .fillna("")
-                .astype(str)
-                .str.replace("\u3000", " ", regex=False)
-                .str.strip()
-            )
+        master_df[column] = (
+            master_df[column]
+            .fillna("")
+            .astype(str)
+            .str.replace("\u3000", " ", regex=False)
+            .str.strip()
+        )
 
     master_df["display_order"] = pd.to_numeric(
         master_df["display_order"],
@@ -169,6 +172,7 @@ def download_stock_data(
     provider_symbol: str,
     period: str,
 ) -> pd.DataFrame:
+
     provider_symbol = str(provider_symbol).strip()
 
     raw_df = yf.download(
@@ -183,7 +187,7 @@ def download_stock_data(
     if raw_df is None or raw_df.empty:
         return pd.DataFrame()
 
-    # yfinanceのバージョンによってはMultiIndexになるため平坦化
+    # yfinanceの列がMultiIndexの場合に平坦化
     if isinstance(raw_df.columns, pd.MultiIndex):
         raw_df.columns = raw_df.columns.get_level_values(0)
 
@@ -202,12 +206,7 @@ def download_stock_data(
     raw_df = raw_df.rename(
         columns={
             date_column: "Date",
-            "Open": "Open",
-            "High": "High",
-            "Low": "Low",
-            "Close": "Close",
             "Adj Close": "Adj_Close",
-            "Volume": "Volume",
         }
     )
 
@@ -233,7 +232,6 @@ def download_stock_data(
         errors="coerce",
     )
 
-    # タイムゾーン情報がある場合は除去
     try:
         raw_df["Date"] = raw_df["Date"].dt.tz_localize(None)
     except (TypeError, AttributeError):
@@ -285,9 +283,12 @@ def download_stock_data(
 
 
 # =========================================================
-# テクニカル指標計算
+# テクニカル指標
 # =========================================================
-def calculate_indicators(price_df: pd.DataFrame) -> pd.DataFrame:
+def calculate_indicators(
+    price_df: pd.DataFrame,
+) -> pd.DataFrame:
+
     df = price_df.copy()
 
     df["MA20"] = (
@@ -302,7 +303,7 @@ def calculate_indicators(price_df: pd.DataFrame) -> pd.DataFrame:
         .mean()
     )
 
-    # RSI（14日）
+    # RSI 14日
     price_change = df["Close"].diff()
 
     gain = price_change.clip(lower=0)
@@ -320,7 +321,10 @@ def calculate_indicators(price_df: pd.DataFrame) -> pd.DataFrame:
         min_periods=14,
     ).mean()
 
-    relative_strength = average_gain / average_loss.replace(0, np.nan)
+    relative_strength = (
+        average_gain
+        / average_loss.replace(0, np.nan)
+    )
 
     df["RSI14"] = 100 - (
         100 / (1 + relative_strength)
@@ -338,7 +342,6 @@ def calculate_indicators(price_df: pd.DataFrame) -> pd.DataFrame:
         "RSI14",
     ] = 50
 
-    # 前日比
     df["Change"] = df["Close"].diff()
     df["Change_Pct"] = df["Close"].pct_change() * 100
 
@@ -346,12 +349,9 @@ def calculate_indicators(price_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =========================================================
-# 状態表示用関数
+# 状態表示
 # =========================================================
-def get_ma_status(
-    ma20: float,
-    ma50: float,
-) -> str:
+def get_ma_status(ma20, ma50) -> str:
     if pd.isna(ma20) or pd.isna(ma50):
         return "計算期間不足"
 
@@ -364,7 +364,7 @@ def get_ma_status(
     return "MA20 ＝ MA50"
 
 
-def get_rsi_status(rsi: float) -> str:
+def get_rsi_status(rsi) -> str:
     if pd.isna(rsi):
         return "計算期間不足"
 
@@ -377,10 +377,7 @@ def get_rsi_status(rsi: float) -> str:
     return "30～70"
 
 
-def format_number(
-    value,
-    digits: int = 2,
-) -> str:
+def format_number(value, digits: int = 2) -> str:
     if pd.isna(value):
         return "-"
 
@@ -396,6 +393,7 @@ def create_chart(
     symbol: str,
     currency: str,
 ) -> go.Figure:
+
     fig = make_subplots(
         rows=3,
         cols=1,
@@ -409,7 +407,6 @@ def create_chart(
         ),
     )
 
-    # ローソク足
     fig.add_trace(
         go.Candlestick(
             x=price_df["Date"],
@@ -425,7 +422,6 @@ def create_chart(
         col=1,
     )
 
-    # 20日移動平均線
     fig.add_trace(
         go.Scatter(
             x=price_df["Date"],
@@ -441,7 +437,6 @@ def create_chart(
         col=1,
     )
 
-    # 50日移動平均線
     fig.add_trace(
         go.Scatter(
             x=price_df["Date"],
@@ -457,7 +452,6 @@ def create_chart(
         col=1,
     )
 
-    # 出来高の色
     volume_colors = np.where(
         price_df["Close"] >= price_df["Open"],
         "rgba(231, 76, 60, 0.65)",
@@ -475,7 +469,6 @@ def create_chart(
         col=1,
     )
 
-    # RSI
     fig.add_trace(
         go.Scatter(
             x=price_df["Date"],
@@ -537,9 +530,9 @@ def create_chart(
     fig.update_layout(
         height=800,
         margin=dict(
-            l=15,
-            r=15,
-            t=70,
+            l=12,
+            r=12,
+            t=75,
             b=20,
         ),
         hovermode="x unified",
@@ -562,13 +555,388 @@ def create_chart(
 
 
 # =========================================================
-# メイン処理
+# iPhone・スマートフォン用ピンチ対応表示
+# =========================================================
+def render_pinch_chart(
+    fig: go.Figure,
+    chart_key: str,
+) -> None:
+
+    safe_key = re.sub(
+        pattern=r"[^a-zA-Z0-9_]",
+        repl="_",
+        string=chart_key,
+    )
+
+    chart_id = f"pinch_chart_{safe_key}"
+
+    config = {
+        "responsive": True,
+        "scrollZoom": True,
+        "displaylogo": False,
+        "displayModeBar": True,
+        "doubleClick": "reset",
+        "showTips": True,
+        "modeBarButtonsToAdd": [
+            "zoomIn2d",
+            "zoomOut2d",
+            "resetScale2d",
+        ],
+    }
+
+    plot_html = fig.to_html(
+        full_html=False,
+        include_plotlyjs=True,
+        config=config,
+        div_id=chart_id,
+    )
+
+    # Plotly標準操作に加えて、2本指の距離から
+    # X軸の表示範囲を直接計算する
+    touch_script = f"""
+    <script>
+    (function() {{
+        const graph = document.getElementById("{chart_id}");
+
+        if (!graph) {{
+            return;
+        }}
+
+        graph.style.width = "100%";
+        graph.style.touchAction = "pan-y";
+
+        let pinchActive = false;
+        let startDistance = 0;
+        let startCenterX = 0;
+        let startMinimum = 0;
+        let startMaximum = 0;
+        let originalMinimum = null;
+        let originalMaximum = null;
+        let lastTapTime = 0;
+
+        function touchDistance(touches) {{
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+
+            return Math.sqrt((dx * dx) + (dy * dy));
+        }}
+
+        function touchCenterX(touches) {{
+            return (
+                touches[0].clientX + touches[1].clientX
+            ) / 2;
+        }}
+
+        function dateToNumber(value) {{
+            if (typeof value === "number") {{
+                return value;
+            }}
+
+            return new Date(value).getTime();
+        }}
+
+        function numberToDate(value) {{
+            return new Date(value).toISOString();
+        }}
+
+        function getXAxis() {{
+            if (!graph._fullLayout) {{
+                return null;
+            }}
+
+            return (
+                graph._fullLayout.xaxis3 ||
+                graph._fullLayout.xaxis2 ||
+                graph._fullLayout.xaxis
+            );
+        }}
+
+        function saveOriginalRange() {{
+            const axis = getXAxis();
+
+            if (!axis || !axis.range) {{
+                return;
+            }}
+
+            if (
+                originalMinimum === null ||
+                originalMaximum === null
+            ) {{
+                originalMinimum = dateToNumber(axis.range[0]);
+                originalMaximum = dateToNumber(axis.range[1]);
+            }}
+        }}
+
+        graph.addEventListener(
+            "touchstart",
+            function(event) {{
+                if (event.touches.length === 2) {{
+                    const axis = getXAxis();
+
+                    if (!axis || !axis.range) {{
+                        return;
+                    }}
+
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    saveOriginalRange();
+
+                    startDistance = touchDistance(event.touches);
+                    startCenterX = touchCenterX(event.touches);
+                    startMinimum = dateToNumber(axis.range[0]);
+                    startMaximum = dateToNumber(axis.range[1]);
+                    pinchActive = true;
+                }}
+            }},
+            {{
+                passive: false,
+                capture: true
+            }}
+        );
+
+        graph.addEventListener(
+            "touchmove",
+            function(event) {{
+                if (
+                    !pinchActive ||
+                    event.touches.length !== 2
+                ) {{
+                    return;
+                }}
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                const currentDistance = touchDistance(
+                    event.touches
+                );
+
+                if (
+                    startDistance <= 0 ||
+                    currentDistance <= 0
+                ) {{
+                    return;
+                }}
+
+                const axis = getXAxis();
+
+                if (!axis) {{
+                    return;
+                }}
+
+                const graphRectangle =
+                    graph.getBoundingClientRect();
+
+                const axisLeft =
+                    graphRectangle.left + axis._offset;
+
+                const axisWidth = axis._length;
+
+                if (!axisWidth || axisWidth <= 0) {{
+                    return;
+                }}
+
+                const startSpan =
+                    startMaximum - startMinimum;
+
+                // 指を広げると表示期間が短くなり拡大
+                const scale =
+                    startDistance / currentDistance;
+
+                let newSpan = startSpan * scale;
+
+                const minimumSpan =
+                    24 * 60 * 60 * 1000 * 5;
+
+                const maximumSpan =
+                    24 * 60 * 60 * 1000 * 365 * 20;
+
+                newSpan = Math.max(
+                    minimumSpan,
+                    Math.min(maximumSpan, newSpan)
+                );
+
+                let centerRatio =
+                    (startCenterX - axisLeft) / axisWidth;
+
+                centerRatio = Math.max(
+                    0,
+                    Math.min(1, centerRatio)
+                );
+
+                const anchor =
+                    startMinimum
+                    + (startSpan * centerRatio);
+
+                const currentCenter =
+                    touchCenterX(event.touches);
+
+                let currentRatio =
+                    (currentCenter - axisLeft) / axisWidth;
+
+                currentRatio = Math.max(
+                    0,
+                    Math.min(1, currentRatio)
+                );
+
+                const newMinimum =
+                    anchor - (newSpan * currentRatio);
+
+                const newMaximum =
+                    newMinimum + newSpan;
+
+                const update = {{
+                    "xaxis.range[0]":
+                        numberToDate(newMinimum),
+                    "xaxis.range[1]":
+                        numberToDate(newMaximum),
+
+                    "xaxis2.range[0]":
+                        numberToDate(newMinimum),
+                    "xaxis2.range[1]":
+                        numberToDate(newMaximum),
+
+                    "xaxis3.range[0]":
+                        numberToDate(newMinimum),
+                    "xaxis3.range[1]":
+                        numberToDate(newMaximum)
+                }};
+
+                Plotly.relayout(graph, update);
+            }},
+            {{
+                passive: false,
+                capture: true
+            }}
+        );
+
+        function finishPinch(event) {{
+            if (
+                pinchActive &&
+                event.touches.length < 2
+            ) {{
+                pinchActive = false;
+            }}
+        }}
+
+        graph.addEventListener(
+            "touchend",
+            finishPinch,
+            {{
+                passive: true,
+                capture: true
+            }}
+        );
+
+        graph.addEventListener(
+            "touchcancel",
+            finishPinch,
+            {{
+                passive: true,
+                capture: true
+            }}
+        );
+
+        // ダブルタップでX軸を自動範囲へ戻す
+        graph.addEventListener(
+            "touchend",
+            function(event) {{
+                if (event.touches.length !== 0) {{
+                    return;
+                }}
+
+                const currentTime = Date.now();
+
+                if (
+                    currentTime - lastTapTime < 350
+                ) {{
+                    Plotly.relayout(
+                        graph,
+                        {{
+                            "xaxis.autorange": true,
+                            "xaxis2.autorange": true,
+                            "xaxis3.autorange": true
+                        }}
+                    );
+
+                    lastTapTime = 0;
+                }} else {{
+                    lastTapTime = currentTime;
+                }}
+            }},
+            {{
+                passive: true
+            }}
+        );
+
+        window.addEventListener(
+            "resize",
+            function() {{
+                if (graph && window.Plotly) {{
+                    Plotly.Plots.resize(graph);
+                }}
+            }}
+        );
+    }})();
+    </script>
+    """
+
+    complete_html = f"""
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+        <meta
+            name="viewport"
+            content="width=device-width,
+                     initial-scale=1.0,
+                     maximum-scale=5.0,
+                     user-scalable=yes"
+        >
+        <style>
+            html, body {{
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                overflow: hidden;
+                background-color: white;
+            }}
+
+            #{chart_id} {{
+                width: 100% !important;
+                touch-action: pan-y;
+                -webkit-user-select: none;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+            }}
+        </style>
+    </head>
+    <body>
+        {plot_html}
+        {touch_script}
+    </body>
+    </html>
+    """
+
+    components.html(
+        complete_html,
+        height=820,
+        scrolling=False,
+    )
+
+
+# =========================================================
+# 銘柄マスター読み込み
 # =========================================================
 try:
-    master_df = load_watchlist(CSV_PATH.as_posix())
+    master_df = load_watchlist(
+        CSV_PATH.as_posix()
+    )
 
 except Exception as error:
-    st.error("銘柄マスターCSVを読み込めませんでした。")
+    st.error(
+        "銘柄マスターCSVを読み込めませんでした。"
+    )
     st.code(str(error))
     st.stop()
 
@@ -583,12 +951,14 @@ excluded_master = master_df.loc[
 
 
 if target_master.empty:
-    st.error("enabled=true の処理対象銘柄がありません。")
+    st.error(
+        "enabled=true の処理対象銘柄がありません。"
+    )
     st.stop()
 
 
 # =========================================================
-# 期間選択
+# 取得期間
 # =========================================================
 period_options = {
     "6か月": "6mo",
@@ -603,7 +973,9 @@ selected_period_label = st.selectbox(
     index=1,
 )
 
-selected_period = period_options[selected_period_label]
+selected_period = period_options[
+    selected_period_label
+]
 
 
 # =========================================================
@@ -613,8 +985,11 @@ stock_data = {}
 summary_records = []
 error_records = []
 
-with st.spinner("処理対象銘柄のデータを取得しています…"):
+with st.spinner(
+    "処理対象銘柄のデータを取得しています…"
+):
     for _, stock in target_master.iterrows():
+
         name = stock["name"]
         symbol = stock["symbol"]
         provider_symbol = stock["provider_symbol"]
@@ -633,19 +1008,23 @@ with st.spinner("処理対象銘柄のデータを取得しています…"):
                     {
                         "銘柄": name,
                         "銘柄コード": symbol,
-                        "内容": "価格データを取得できませんでした",
+                        "内容":
+                            "価格データを取得できませんでした",
                     }
                 )
                 continue
 
-            price_df = calculate_indicators(price_df)
+            price_df = calculate_indicators(
+                price_df
+            )
 
             if price_df.empty:
                 error_records.append(
                     {
                         "銘柄": name,
                         "銘柄コード": symbol,
-                        "内容": "整形後のデータがありません",
+                        "内容":
+                            "整形後のデータがありません",
                     }
                 )
                 continue
@@ -656,27 +1035,45 @@ with st.spinner("処理対象銘柄のデータを取得しています…"):
 
             summary_records.append(
                 {
-                    "表示順": stock["display_order"],
-                    "銘柄": name,
-                    "銘柄コード": symbol,
-                    "市場": market,
-                    "業種": category,
-                    "通貨": currency,
-                    "データ日": latest["Date"].strftime("%Y-%m-%d"),
-                    "終値": latest["Close"],
-                    "前日比": latest["Change"],
-                    "前日比（%）": latest["Change_Pct"],
-                    "MA20": latest["MA20"],
-                    "MA50": latest["MA50"],
-                    "移動平均線の状態": get_ma_status(
+                    "表示順":
+                        stock["display_order"],
+                    "銘柄":
+                        name,
+                    "銘柄コード":
+                        symbol,
+                    "市場":
+                        market,
+                    "業種":
+                        category,
+                    "通貨":
+                        currency,
+                    "データ日":
+                        latest["Date"].strftime(
+                            "%Y-%m-%d"
+                        ),
+                    "終値":
+                        latest["Close"],
+                    "前日比":
+                        latest["Change"],
+                    "前日比（%）":
+                        latest["Change_Pct"],
+                    "MA20":
                         latest["MA20"],
+                    "MA50":
                         latest["MA50"],
-                    ),
-                    "RSI14": latest["RSI14"],
-                    "RSIの範囲": get_rsi_status(
-                        latest["RSI14"]
-                    ),
-                    "取得件数": len(price_df),
+                    "移動平均線の状態":
+                        get_ma_status(
+                            latest["MA20"],
+                            latest["MA50"],
+                        ),
+                    "RSI14":
+                        latest["RSI14"],
+                    "RSIの範囲":
+                        get_rsi_status(
+                            latest["RSI14"]
+                        ),
+                    "取得件数":
+                        len(price_df),
                 }
             )
 
@@ -690,12 +1087,15 @@ with st.spinner("処理対象銘柄のデータを取得しています…"):
             )
 
 
-summary_df = pd.DataFrame(summary_records)
+summary_df = pd.DataFrame(
+    summary_records
+)
 
 
 if summary_df.empty:
     st.error(
-        "処理対象銘柄の価格データを取得できませんでした。"
+        "処理対象銘柄の価格データを"
+        "取得できませんでした。"
     )
 
     if error_records:
@@ -716,9 +1116,11 @@ summary_df = (
 
 
 # =========================================================
-# 第11段階：比較サマリー
+# 比較サマリー
 # =========================================================
-st.subheader("第11段階：処理対象銘柄の比較サマリー")
+st.subheader(
+    "第11段階：処理対象銘柄の比較サマリー"
+)
 
 summary_display_df = summary_df[
     [
@@ -746,8 +1148,7 @@ numeric_display_columns = [
 
 for column in numeric_display_columns:
     summary_display_df[column] = (
-        summary_display_df[column]
-        .round(2)
+        summary_display_df[column].round(2)
     )
 
 st.dataframe(
@@ -759,10 +1160,11 @@ st.dataframe(
             "終値",
             format="%.2f",
         ),
-        "前日比（%）": st.column_config.NumberColumn(
-            "前日比（%）",
-            format="%.2f%%",
-        ),
+        "前日比（%）":
+            st.column_config.NumberColumn(
+                "前日比（%）",
+                format="%.2f%%",
+            ),
         "MA20": st.column_config.NumberColumn(
             "MA20",
             format="%.2f",
@@ -780,7 +1182,7 @@ st.dataframe(
 
 
 # =========================================================
-# サマリーCSV保存
+# 比較サマリーCSV
 # =========================================================
 summary_csv = summary_display_df.to_csv(
     index=False,
@@ -797,12 +1199,14 @@ st.download_button(
 
 
 # =========================================================
-# 個別銘柄選択
+# 個別銘柄
 # =========================================================
 st.divider()
 st.subheader("個別銘柄の確認")
 
-available_symbols = summary_df["銘柄コード"].tolist()
+available_symbols = (
+    summary_df["銘柄コード"].tolist()
+)
 
 label_map = {
     row["銘柄コード"]:
@@ -813,21 +1217,25 @@ label_map = {
 selected_symbol = st.selectbox(
     "表示する銘柄",
     options=available_symbols,
-    format_func=lambda value: label_map.get(value, value),
+    format_func=lambda value:
+        label_map.get(value, value),
 )
 
 selected_summary = summary_df.loc[
-    summary_df["銘柄コード"] == selected_symbol
+    summary_df["銘柄コード"]
+    == selected_symbol
 ].iloc[0]
 
-selected_price_df = stock_data[selected_symbol]
+selected_price_df = stock_data[
+    selected_symbol
+]
 
 selected_name = selected_summary["銘柄"]
 selected_currency = selected_summary["通貨"]
 
 
 # =========================================================
-# 最新値カード
+# 最新値
 # =========================================================
 column1, column2 = st.columns(2)
 
@@ -835,12 +1243,15 @@ with column1:
     st.metric(
         label=f"終値（{selected_currency}）",
         value=format_number(
-            selected_summary["終値"],
-            2,
+            selected_summary["終値"]
         ),
         delta=(
-            f'{format_number(selected_summary["前日比（%）"], 2)}%'
-            if not pd.isna(selected_summary["前日比（%）"])
+            f'{format_number(
+                selected_summary["前日比（%）"]
+            )}%'
+            if not pd.isna(
+                selected_summary["前日比（%）"]
+            )
             else None
         ),
     )
@@ -849,10 +1260,8 @@ with column2:
     st.metric(
         label="RSI（14日）",
         value=format_number(
-            selected_summary["RSI14"],
-            2,
+            selected_summary["RSI14"]
         ),
-        delta=None,
     )
 
 column3, column4 = st.columns(2)
@@ -861,8 +1270,7 @@ with column3:
     st.metric(
         label="20日移動平均",
         value=format_number(
-            selected_summary["MA20"],
-            2,
+            selected_summary["MA20"]
         ),
     )
 
@@ -870,20 +1278,30 @@ with column4:
     st.metric(
         label="50日移動平均",
         value=format_number(
-            selected_summary["MA50"],
-            2,
+            selected_summary["MA50"]
         ),
     )
 
 st.info(
     f'データ日：{selected_summary["データ日"]}　｜　'
-    f'移動平均線：{selected_summary["移動平均線の状態"]}　｜　'
+    f'移動平均線：'
+    f'{selected_summary["移動平均線の状態"]}　｜　'
     f'RSI範囲：{selected_summary["RSIの範囲"]}'
 )
 
 
 # =========================================================
-# 個別チャート
+# 操作説明
+# =========================================================
+st.caption(
+    "グラフ操作：2本指を広げると拡大、"
+    "閉じると縮小します。"
+    "1本指で横移動、ダブルタップでリセットできます。"
+)
+
+
+# =========================================================
+# ピンチ操作対応チャート
 # =========================================================
 chart = create_chart(
     price_df=selected_price_df,
@@ -892,22 +1310,16 @@ chart = create_chart(
     currency=selected_currency,
 )
 
-st.plotly_chart(
-    chart,
-    use_container_width=True,
-    config={
-        "responsive": True,
-        "scrollZoom": True,
-        "displaylogo": False,
-        "displayModeBar": True,
-        "doubleClick": "reset",
-        "showTips": True,
-    },
+render_pinch_chart(
+    fig=chart,
+    chart_key=(
+        f"{selected_symbol}_{selected_period}"
+    ),
 )
 
 
 # =========================================================
-# 個別データCSV保存
+# 個別データCSV
 # =========================================================
 download_df = selected_price_df.copy()
 
@@ -922,18 +1334,24 @@ individual_csv = download_df.to_csv(
 )
 
 st.download_button(
-    label=f"{selected_symbol} のデータをCSVで保存",
+    label=(
+        f"{selected_symbol} のデータをCSVで保存"
+    ),
     data=individual_csv,
-    file_name=f"{selected_symbol}_price_data.csv",
+    file_name=(
+        f"{selected_symbol}_price_data.csv"
+    ),
     mime="text/csv",
     use_container_width=True,
 )
 
 
 # =========================================================
-# 処理結果
+# 処理対象確認
 # =========================================================
-with st.expander("処理対象・処理対象外を確認"):
+with st.expander(
+    "処理対象・処理対象外を確認"
+):
     st.write(
         f"処理対象：{len(target_master)}件"
     )
@@ -970,7 +1388,9 @@ with st.expander("処理対象・処理対象外を確認"):
 
 
 if error_records:
-    with st.expander("取得できなかった銘柄を確認"):
+    with st.expander(
+        "取得できなかった銘柄を確認"
+    ):
         st.dataframe(
             pd.DataFrame(error_records),
             use_container_width=True,
@@ -979,13 +1399,13 @@ if error_records:
 
 
 st.success(
-    f"第11段階の処理が完了しました。"
+    "第11段階の処理が完了しました。"
     f"正常取得：{len(summary_df)}件、"
     f"処理対象外：{len(excluded_master)}件"
 )
 
 st.caption(
-    "RSIや移動平均線の表示は、過去データを機械的に計算した学習用情報です。"
-    "売買判断を示すものではありません。"
-    "取得データはリアルタイムとは限らないため、最新の相場はmoomooでご確認ください。"
+    "表示データや指標は学習・参考用です。"
+    "リアルタイムデータとは限りません。"
+    "最新の相場や取引可能価格はmoomooでご確認ください。"
 )
