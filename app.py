@@ -665,8 +665,7 @@ def create_relative_chart(
                 name=f"{name}（{symbol}）",
                 line=dict(width=2.2),
                 hovertemplate=(
-                    "%{x|%Y-%m-%d}
-"
+                    "%{x|%Y-%m-%d}<br>"
                     "相対値：%{y:.2f}"
                     "<extra>%{fullData.name}</extra>"
                 ),
@@ -1644,12 +1643,8 @@ with column1:
             selected_summary["終値"]
         ),
         delta=(
-            f'{format_number(
-                selected_summary["前日比（%）"]
-            )}%'
-            if not pd.isna(
-                selected_summary["前日比（%）"]
-            )
+            f"{format_number(selected_summary['前日比（%）'])}%"
+            if not pd.isna(selected_summary["前日比（%）"])
             else None
         ),
     )
