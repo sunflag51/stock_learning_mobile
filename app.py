@@ -685,11 +685,15 @@ def create_relative_chart(
         title_text="日付",
         fixedrange=False,
         rangeslider_visible=False,
+        showgrid=True,
+        gridcolor="rgba(128, 128, 128, 0.15)",
     )
 
     fig.update_yaxes(
         title_text="相対値（開始時点＝100）",
         fixedrange=False,
+        showgrid=True,
+        gridcolor="rgba(128, 128, 128, 0.15)",
     )
 
     fig.update_layout(
@@ -698,15 +702,7 @@ def create_relative_chart(
             "（各銘柄の開始時点＝100）"
         ),
         height=520,
-        margin=dict(
-            l=15,
-            r=15,
-            t=85,
-            b=30,
-        ),
-        template="plotly_white",
         hovermode="x unified",
-        dragmode="pan",
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -714,14 +710,15 @@ def create_relative_chart(
             xanchor="left",
             x=0,
         ),
-        modebar=dict(
-            orientation="h",
+        margin=dict(
+            l=20,
+            r=20,
+            t=100,
+            b=20,
         ),
-        uirevision="relative_comparison",
     )
 
     return fig
-
 
 # =========================================================
 # スマートフォン向けピンチ操作対応表示
